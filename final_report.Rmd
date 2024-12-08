@@ -1,0 +1,363 @@
+---
+title: "STAT 4620 Project Report"
+author: "Aidan Dilsavor, Jacob Bailey, Gaurav Law"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(glmnet)
+library(dplyr)
+library(skimr)
+library(ggplot2)
+library(reshape2)
+```
+
+# Part 1: Exploratory Data Analysis
+
+For this project, we were given a dataset containing features of houses in Ames, Iowa, USA. We were given a training set with 14600 observations and a testing set with 1447 observations. There are 79 different attributes - 43 categorical, and 36 numerical. The response variable is SalePrice, which is the numeric value in dollars that the house sold for, and this is what we are trying to predict with a model.
+
+```{r}
+# read data in
+train_data = read.csv('train.csv')
+test_data = read.csv('test.csv')
+
+# combine data for transformations
+combined_data = rbind(train_data, test_data)
+
+num_training = 1460
+
+# drop Id
+combined_data['Id'] = NULL
+
+# summary of data
+skim(combined_data)
+
+set.seed(1)
+```
+
+After initially examining the dataset, we can see there are many 'null' categorical values. However, many of them shown as 'null' are in fact representing a category such as 'None' for a given categorical predictor. Values such as these will be transformed to more meaningful, non-null categories below. For example if 'GarageQual' is null, it will become 'NoGarage'.
+
+```{r}
+# Replace NA in Alley with "NoAccess"
+combined_data$Alley[is.na(combined_data$Alley)] = "NoAccess"
+
+# One missing value in 'Utilities', but supposed to be no nulls. We will drop it
+combined_data = subset(combined_data, !is.na(Utilities))
+
+# Replace MasVnrType nulls with 'None'
+combined_data$MasVnrType[is.na(combined_data$MasVnrType)] = "None"
+
+# Replace BsmtQual, BsmtCond, BsmtExposure, BsmtFinType1, BsmtFinType2  nulls with 'NoBasement'
+combined_data$BsmtQual[is.na(combined_data$BsmtQual)] = "NoBasement"
+combined_data$BsmtCond[is.na(combined_data$BsmtCond)] = "NoBasement"
+combined_data$BsmtExposure[is.na(combined_data$BsmtExposure)] = "NoBasement"
+combined_data$BsmtFinType1[is.na(combined_data$BsmtFinType1)] = "NoBasement"
+combined_data$BsmtFinType2[is.na(combined_data$BsmtFinType2)] = "NoBasement"
+
+# One missing value in 'Electrical', but supposed to be no nulls. We will drop it
+combined_data = subset(combined_data, !is.na(Electrical))
+
+# One missing value in 'KitchenQual', but supposed to be no nulls. We will drop it
+combined_data = subset(combined_data, !is.na(KitchenQual))
+
+# One missing value in 'Functional', but supposed to be no nulls. We will drop it
+combined_data = subset(combined_data, !is.na(Functional))
+
+# Replace FireplaceQu nulls with 'NoFireplace'
+combined_data$FireplaceQu[is.na(combined_data$FireplaceQu)] = "NoFireplace"
+
+# Replace GarageType, GarageFinish, GarageQual, GarageCond nulls with 'NoGarage'
+combined_data$GarageType[is.na(combined_data$GarageType)] = "NoGarage"
+combined_data$GarageFinish[is.na(combined_data$GarageFinish)] = "NoGarage"
+combined_data$GarageQual[is.na(combined_data$GarageQual)] = "NoGarage"
+combined_data$GarageCond[is.na(combined_data$GarageCond)] = "NoGarage"
+
+# Replace PoolQC nulls with 'NoPool'
+combined_data$PoolQC[is.na(combined_data$PoolQC)] = "NoPool"
+
+# Replace Fence nulls with 'NoFence'
+combined_data$Fence[is.na(combined_data$Fence)] = "NoFence"
+
+# Replace MiscFeature nulls with 'None'
+combined_data$MiscFeature[is.na(combined_data$MiscFeature)] = "None"
+
+# Replace SaleType nulls with 'Other'
+combined_data$SaleType[is.na(combined_data$SaleType)] = "Other"
+
+```
+
+There are not many numerical null values, but for the ones that are, we will replace with the median value of that column to prevent any skew of the predictor to influence this estimate.
+
+```{r}
+# Impute LotFrontage with the median
+combined_data$LotFrontage[is.na(combined_data$LotFrontage)] = median(combined_data$LotFrontage, na.rm = TRUE)
+
+# Impute MasVnrArea with the median
+combined_data$MasVnrArea[is.na(combined_data$MasVnrArea)] = median(combined_data$MasVnrArea, na.rm = TRUE)
+
+# Impute BsmtFullBath with the median
+combined_data$BsmtFullBath[is.na(combined_data$BsmtFullBath)] = median(combined_data$BsmtFullBath, na.rm = TRUE)
+
+# Impute BsmtHalfBath with the median
+combined_data$BsmtHalfBath[is.na(combined_data$BsmtHalfBath)] = median(combined_data$BsmtHalfBath, na.rm = TRUE)
+
+# Impute GarageYrBlt with the median
+combined_data$GarageYrBlt[is.na(combined_data$GarageYrBlt)] = median(combined_data$GarageYrBlt, na.rm = TRUE)
+```
+
+
+Now we'll make sure the data is complete
+```{r}
+any(is.na(combined_data))
+
+```
+
+After examining the data, we expect there to be strong multi-collinearity. This is due to the fact that there are so many predictors and also intuitively, predictors such as ‘GarageArea’ and ‘GarageCars’ will likely be highly correlated. To further examine this, we will create a correlation heatmap displaying the linear relationship strengths between each predictor.
+
+```{r}
+
+# Get categorical predictors
+categorical_cols = names(combined_data)[sapply(combined_data, is.character) | sapply(combined_data, is.factor)]
+
+# Get numerical predictors
+numeric_cols = names(combined_data)[sapply(combined_data, is.numeric)]
+
+# One-hot encode categorical variables
+data_encoded = as.data.frame(model.matrix(~ . - 1, data = combined_data[categorical_cols]))
+
+# Combine numeric and encoded categorical variables
+data_combined = cbind(combined_data[numeric_cols], data_encoded)
+
+# Compute correlation matrix
+cor_matrix = cor(data_combined, use = "pairwise.complete.obs")
+
+# Melt correlation matrix
+cor_melt = melt(cor_matrix)
+
+# Generate heatmap
+ggplot(cor_melt, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),  # Remove x-axis labels
+    axis.text.y = element_blank()   # Remove y-axis labels
+  ) +
+  labs(title = "Correlation Heatmap", x = "Predictors", y = "Predictors", fill = "Correlation")
+```
+
+
+From the above plot, it is clear that many predictors are strongly linearly correlated. Because of this, we are interested in models that can handle multicollinearity. We will examine the following before choosing a final model to predict with:
+  
+  - LASSO
+  - Ridge
+  - PLS
+  - PCR
+  
+# Part 2: Model Analysis
+
+For each model we wish to evaluate, we will fit it to the training data using cross validation for parameters, then validate the model using K-fold validation sets, and finally select the model with the lowest validated rmse to move on to testing.
+
+
+### Ridge & LASSO
+
+Ridge and LASSO regression are ideal for predicting SalePrice in the Ames housing dataset due to their ability to handle multicollinearity and prevent overfitting in datasets with many predictors. Ridge regression minimizes the impact of correlated features by shrinking coefficients, while LASSO performs variable selection by driving some coefficients to zero, creating simpler, more interpretable models.
+
+**Ridge Description:**
+
+Ridge regression minimizes the following cost function:
+
+\[
+\text{Loss} = \sum_{i=1}^n \left(y_i - \mathbf{x}_i^\top \beta \right)^2 + \lambda \sum_{j=1}^p \beta_j^2
+\]
+
+where:
+
+- \(y_i\): Actual value of the target variable for observation \(i\).
+
+- \(\mathbf{x}_i\): Predictor vector for observation \(i\).
+
+- \(\beta\): Coefficient vector.
+
+- \(\lambda\): Regularization parameter controlling the penalty on the sum of squared coefficients (\(\lambda > 0\)).
+
+The second term penalizes large coefficients, shrinking them to reduce overfitting, but all predictors remain in the model.
+
+
+**LASSO Description:**
+
+Lasso regression minimizes the following cost function:
+
+\[
+\text{Loss} = \sum_{i=1}^n \left(y_i - \mathbf{x}_i^\top \beta \right)^2 + \lambda \sum_{j=1}^p |\beta_j|
+\]
+
+where:
+
+- \(y_i\): Actual value of the target variable for observation \(i\).
+
+- \(\mathbf{x}_i\): Predictor vector for observation \(i\).
+
+- \(\beta\): Coefficient vector.
+
+- \(\lambda\): Regularization parameter controlling the penalty on the absolute values of coefficients (\(\lambda > 0\)).
+
+The \(L_1\)-norm penalty encourages sparsity in the model, driving some coefficients to zero and effectively selecting only the most relevant features.
+
+
+**Model Validation:**
+
+
+```{r}
+
+full_data_X = model.matrix(SalePrice ~ ., data = combined_data)[,-1]
+full_data_Y = combined_data$SalePrice
+
+# Split data into training and testing sets
+trainX = full_data_X[1:num_training, ]
+trainY = full_data_Y[1:num_training]
+
+testX = full_data_X[(num_training + 1):nrow(full_data_X), ]
+testY = full_data_Y[(num_training + 1):nrow(full_data_X)]
+
+# 10-fold cross validation
+cv_fit.lasso = cv.glmnet(trainX, trainY, alpha = 1, nfolds = 10) 
+cv_fit.ridge = cv.glmnet(trainX, trainY, alpha = 0, nfolds = 10) 
+
+
+# Optimal lambda
+best_lambda_lasso = cv_fit.lasso$lambda.min
+best_lambda_ridge = cv_fit.ridge$lambda.min
+
+
+average_rmse_lasso = sqrt(cv_fit.lasso$cvm[cv_fit.lasso$lambda == best_lambda_lasso])
+average_rmse_ridge = sqrt(cv_fit.ridge$cvm[cv_fit.ridge$lambda == best_lambda_ridge])
+
+# Print results
+print(paste("10-Fold Average Ridge RMSE: ", average_rmse_ridge))
+print(paste("10-Fold Average Lasso RMSE: ", average_rmse_lasso))
+
+```
+
+
+**CV Lambda Plots for Ridge & LASSO**
+
+The following plots show how the optimal regularization parameter $\lambda$ is chosen for LASSO and Ridge Regression.
+
+```{r}
+
+# Fit the Ridge model with cross-validation
+ridge.cv = cv.glmnet(trainX, trainY, alpha=0)
+
+# Fit the Lasso model with cross-validation
+lasso.cv = cv.glmnet(trainX, trainY, alpha=1)
+
+# plot lambdas
+par(mfrow = c(1, 2), mar = c(5, 4, 4, 2) + 1) 
+
+plot(ridge.cv,main='Ridge Lambda Performance') 
+plot(lasso.cv, main='LASSO Lambda Performance') 
+
+```
+
+**Assumptions:**
+
+Ridge Regression and PLS makes certain assumptions such as:
+
+- Linearity: The relationship between predictors and the target variable is linear.
+
+- Independent Errors: Errors are independent of each other.
+
+- Normality of Errors: Errors are normally distributed.
+
+- Homoscedasticity: The variances of the errors are equal.
+
+
+To show these assumptions are satisfied, we will plot residuals of the model against fitted values, a histogram of the residuals, and a QQ plot.
+
+**Ridge Plots**
+
+```{r}
+# Fit Ridge Regression
+ridge_model = glmnet(trainX, trainY, alpha = 0)
+
+# Predict on training data
+predictions = predict(ridge_model, newx = trainX, s=ridge_model$lambda.min)
+
+# Compute residuals
+residuals = trainY - predictions
+
+# Plotting
+
+# Residuals vs Fitted
+plot(predictions, residuals, xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")
+
+# Histogram
+hist(residuals, main = "Histogram of Residuals", xlab = "Residuals")
+
+# QQ Plot
+qqnorm(residuals)
+qqline(residuals, col = "red")
+```
+
+
+**PLS Plots**
+
+```{r}
+library(pls)
+
+# Fit PLS
+pls_model = plsr(trainY ~ trainX, ncomp = 7) 
+
+# Predict on training data
+predictions = predict(pls_model, ncomp = 7) 
+
+# Compute residuals
+residuals = trainY - predictions
+
+
+# Plotting
+
+# Residuals vs Fitted
+plot(predictions, residuals, xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")
+
+# Histogram
+hist(residuals, main = "Histogram of Residuals", xlab = "Residuals")
+
+# QQ Plot
+qqnorm(residuals)
+qqline(residuals, col = "red")
+```
+
+
+
+## Results with testing data
+
+```{r}
+
+cv_model = cv.glmnet(trainX, trainY, alpha = 0) 
+
+best_lambda = cv_model$lambda.min
+print(paste("Optimal Lambda:", best_lambda))
+
+# Fit final Ridge model with the best lambda
+final_model = glmnet(trainX, trainY, alpha = 0, lambda = best_lambda)
+
+# Predict on test data
+predictions = predict(final_model, newx = testX)
+
+# Evaluate model performance (RMSE)
+rmse = sqrt(mean((predictions - testY)^2))
+print(paste("RMSE on test data:", rmse))
+```
+
+
+
+
+
