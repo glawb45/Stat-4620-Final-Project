@@ -271,9 +271,6 @@ The \(L_1\)-norm penalty encourages sparsity in the model, driving some coeffici
 
 ```{r}
 
-full_data_X = model.matrix(SalePrice ~ ., data = combined_data)[,-1]
-full_data_Y = combined_data$SalePrice
-
 # Split data into training and testing sets
 trainX = full_data_X[1:num_training, ]
 trainY = full_data_Y[1:num_training]
@@ -395,10 +392,7 @@ qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
 
-# Code to switch from adjusted model matrix to data frame for tree based models
-# combined_data <- as.data.frame(full_data_X)
-# Ensure the response variable is included
-# combined_data$SalePrice <- combined_data$SalePrice
+# Need to switch from design matrix full_data_X back to df for tree models
 
 **Tree-based models: Decision Trees, Bagging, Random Forest**
 
