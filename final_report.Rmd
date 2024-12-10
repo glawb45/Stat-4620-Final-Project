@@ -153,12 +153,67 @@ ggplot(cor_melt, aes(Var1, Var2, fill = value)) +
 ```
 
 
-From the above plot, it is clear that many predictors are strongly linearly correlated. Because of this, we are interested in models that can handle multicollinearity. We will examine the following before choosing a final model to predict with:
+From the above plot, it is clear that many predictors are strongly linearly correlated. Because of this, we are interested in models that can handle multicollinearity. We will also try to address this problem before making any models.
   
-  - LASSO
-  - Ridge
-  - PLS
-  - PCR
+## Addressing Multicollinearity
+
+Before building the models, we are going to remove the highly correlated predictors by examining correlations between all features.
+
+```{r}
+# Define threshold where predictors will be removed
+threshold = 0.85
+
+# Model matrix to get levels for categorical predictors
+full_data_X = model.matrix(SalePrice ~ ., data = combined_data)[,-1]
+full_data_Y = combined_data$SalePrice
+
+# Compute the correlation matrix for the predictors 
+correlation_matrix = cor(full_data_X, use = "complete.obs")
+
+# Convert the correlation matrix to a data frame for filtering
+cor_pairs = as.data.frame(as.table(correlation_matrix))
+
+# Filter for significant correlations above a threshold (excluding self-correlations)
+cor_pairs_filtered = subset(cor_pairs, abs(Freq) > threshold & Var1 != Var2)
+
+# Sort by absolute correlation value
+cor_pairs_filtered = cor_pairs_filtered[order(-abs(cor_pairs_filtered$Freq)), ]
+
+# Display the top correlated predictors
+print(cor_pairs_filtered)
+```
+
+From the above table there are a many pairs of variables with correlation above 0.85. This is very high, so we will remove one variable from each pair.
+
+```{r}
+# Columns to remove
+columns_to_remove <- c("BsmtFinType1NoBasement", "GarageQualNoGarage", "GarageCondNoGarage", "GarageTypeNoGarage",  "BsmtFinType2NoBasement", "BsmtFinType1NoBasement", "BsmtQualNoBasement", "SaleConditionPartial", "Exterior2ndCmentBd", "Exterior2ndVinylSd", "BsmtExposureNoBasement", "Exterior2ndMetalSd", "MiscFeatureNone", "RoofStyleHip", "ExterQualTA", "FireplaceQuNoFireplace", "GarageCars", "Exterior2ndHdBoard", "ExterCondTA", "MSZoningFV", "Exterior2ndWd Sdng", "PoolQCNoPool")
+
+full_data_X <- full_data_X[, !colnames(full_data_X) %in% columns_to_remove]
+
+```
+
+## Examining possible important features of the model
+
+```{r}
+# Compute correlations of each feature in the model matrix with SalePrice
+correlations <- cor(full_data_X, full_data_Y, use = "complete.obs")
+
+# Convert to a data frame
+correlation_df <- data.frame(
+  Feature = colnames(full_data_X),
+  Correlation = correlations
+)
+
+# Sort by absolute correlation value in descending order
+correlation_df <- correlation_df[order(-abs(correlation_df$Correlation)), ]
+
+# Display the top correlations
+print(head(correlation_df, 5))
+```
+
+From the above output, we can see before doing any modeling that likely important predictors are: "OverallQual", "GrLivArea", "GarageArea", "TotalBsmtSF", and "X1stFlrSF".
+
   
 # Part 2: Model Analysis
 
@@ -340,6 +395,10 @@ qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
 
+# Code to switch from adjusted model matrix to data frame for tree based models
+# combined_data <- as.data.frame(full_data_X)
+# Ensure the response variable is included
+# combined_data$SalePrice <- combined_data$SalePrice
 
 **Tree-based models: Decision Trees, Bagging, Random Forest**
 
