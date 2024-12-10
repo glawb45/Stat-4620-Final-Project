@@ -14,6 +14,8 @@ library(dplyr)
 library(skimr)
 library(ggplot2)
 library(reshape2)
+library(tree)
+library(randomForest)
 ```
 
 # Part 1: Exploratory Data Analysis
@@ -262,6 +264,9 @@ par(mfrow = c(1, 2), mar = c(5, 4, 4, 2) + 1)
 plot(ridge.cv,main='Ridge Lambda Performance') 
 plot(lasso.cv, main='LASSO Lambda Performance') 
 
+# print out coefficients for lasso model to see which ones to select
+print(coef(lasso.cv))
+
 ```
 
 **Assumptions:**
@@ -336,10 +341,77 @@ qqline(residuals, col = "red")
 ```
 
 
+**Tree-based models: Decision Trees, Bagging, Random Forest**
+
+```{r tree with training}
+
+training_data <- combined_data[1:num_training, ]
+testing_data <- combined_data[num_training:nrow(combined_data), ]
+
+mod_tree = tree(SalePrice ~ ., data = training_data)
+mod_tree
+
+# get model for decision tree
+summary(mod_tree)
+
+# plot the tree
+plot(mod_tree, cex = 0.8)   # Adjust tree size
+text(mod_tree, pretty = 0, cex = 0.6)  # Adjust text size
+
+mod_tree_pred = predict(mod_tree, newdata = training_data)
+mod_tree_rmse = sqrt(mean((training_data$SalePrice - mod_tree_pred)^2))
+mod_tree_rmse
+
+cv_tree = cv.tree(mod_tree)
+names(cv_tree)
+
+cv_tree
+
+with(cv_tree, plot(dev~size, type = 'b'))
+```
+
+```{r bagging with training}
+
+set.seed(123)
+
+mod_bag = randomForest(SalePrice ~ ., data = training_data,  mtry = NCOL(training_data)-1, importance = TRUE)
+mod_bag
+
+plot(mod_bag)
+
+mod_bag_pred = predict(mod_bag, newdata = training_data)
+mod_bag_rmse  = sqrt(mean((training_data$SalePrice - mod_bag_pred)^2))
+mod_bag_rmse
+
+importance(mod_bag)
+varImpPlot(mod_bag, cex = 0.6)
+```
+
+```{r Random Forest with training}
+
+mod_rf = randomForest(SalePrice ~ ., data = training_data,  mtry = sqrt(NCOL(training_data)-1), importance = TRUE)
+mod_rf
+
+plot(mod_rf)
+
+mod_rf_pred = predict(mod_rf, newdata = training_data)
+mod_rf_rmse  = sqrt(mean((training_data$SalePrice - mod_rf_pred)^2))
+mod_rf_rmse
+
+varImpPlot(mod_rf, cex = 0.6)
+varImpPlot(mod_bag)
+
+cat("Tree RMSE:", mod_tree_rmse, "\n")
+cat("Bagging RMSE:", mod_bag_rmse, "\n")
+cat("Random Forest RMSE:", mod_rf_rmse)
+
+
+```
+
 
 ## Results with testing data
 
-```{r}
+```{r lasso + ridge}
 
 cv_model = cv.glmnet(trainX, trainY, alpha = 0) 
 
@@ -357,7 +429,103 @@ rmse = sqrt(mean((predictions - testY)^2))
 print(paste("RMSE on test data:", rmse))
 ```
 
+***Now: Use Lasso Model to Advantage***
+
+Now that we have a pruned dataset, in terms of which varaibles are most important, we will use only those variables moving forward for optimal model selection
+
+```{r}
+final_set <- full_data_X
+final_set <- as.data.frame(final_set) # convert the model matriix into a data frame
+
+# Add SalePrice back to the dataset to make tree-based models
+final_set <- cbind(SalePrice = combined_data$SalePrice, final_set)
+
+# Only keep informative predictors
+final_set <- final_set[, c(1, 37, 39, 75, 77:78, 123, 126, 144, 154, 163, 178, 181, 190, 198, 214:215, 253)]
+```
 
 
 
+```{r tree with testing}
 
+training_data <- final_set[1:num_training, ]
+testing_data <- final_set[num_training:nrow(combined_data), ]
+
+mod_tree = tree(SalePrice ~ ., data = training_data)
+mod_tree
+
+# get model for decision tree
+summary(mod_tree)
+
+# plot the tree
+plot(mod_tree, cex = 0.8)   # Adjust tree size
+text(mod_tree, pretty = 0, cex = 0.6)  # Adjust text size
+
+mod_tree_pred = predict(mod_tree, newdata = testing_data)
+mod_tree_rmse = sqrt(mean((testing_data$SalePrice - mod_tree_pred)^2))
+mod_tree_rmse
+
+cv_tree = cv.tree(mod_tree)
+names(cv_tree)
+
+cv_tree
+
+with(cv_tree, plot(dev~size, type = 'b'))
+```
+
+
+```{r bagging with testing}
+set.seed(123)
+
+mod_bag = randomForest(SalePrice ~ ., data = training_data,  mtry = NCOL(training_data)-1, importance = TRUE)
+mod_bag
+
+plot(mod_bag)
+
+mod_bag_pred = predict(mod_bag, newdata = testing_data)
+mod_bag_rmse  = sqrt(mean((testing_data$SalePrice - mod_bag_pred)^2))
+mod_bag_rmse
+
+importance(mod_bag)
+varImpPlot(mod_bag, cex = 0.6)
+```
+
+```{r Random Forest with testing}
+
+mod_rf = randomForest(SalePrice ~ ., data = training_data,  mtry = sqrt(NCOL(training_data)-1), importance = TRUE)
+mod_rf
+
+plot(mod_rf)
+
+mod_rf_pred = predict(mod_rf, newdata = testing_data)
+mod_rf_rmse  = sqrt(mean((testing_data$SalePrice - mod_rf_pred)^2))
+mod_rf_rmse
+
+varImpPlot(mod_rf, cex = 0.6)
+varImpPlot(mod_bag, cex = 0.6)
+
+cat("Tree RMSE:", mod_tree_rmse, "\n")
+cat("Bagging RMSE:", mod_bag_rmse, "\n")
+cat("Random Forest RMSE:", mod_rf_rmse)
+
+plot(mod_rf, cex = 0.8)   # Adjust tree size
+text(mod_rf, pretty = 0, cex = 0.6)  # Adjust text size
+
+library(rpart)
+library(rpart.plot)
+
+
+tree_model <- rpart(SalePrice ~ ., data = training_data)
+rpart.plot::rpart.plot(tree_model)
+
+
+# Get the feature importance
+importance_matrix <- importance(mod_rf)
+
+# Perform hierarchical clustering on feature importance
+dendrogram <- hclust(dist(importance_matrix))
+
+# Plot the dendrogram
+plot(dendrogram, main = "Dendrogram of Feature Importance", xlab = "Features", ylab = "Distance")
+
+```
