@@ -1,0 +1,115 @@
+---
+title: "Untitled"
+author: "Aidan Dilsavor"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## PLS Model
+
+```{r}
+train <- read.csv("C:/Users/aidan/Downloads/train.csv")
+library(pls)
+```
+
+
+```{r}
+
+cols_to_update <- c(4, 7, 27, 73, 74, 75)
+
+train[ , cols_to_update] <- lapply(train[ , cols_to_update], function(x) ifelse(is.na(x), 0, x))
+
+mean_col_60 <- mean(train[, 60], na.rm = TRUE)
+
+train[, 60][is.na(train[, 60])] <- mean_col_60
+
+train[is.na(train)] <- "N/A"
+```
+
+
+```{r}
+library(fastDummies)
+library(caret)
+train_data_dummies <- fastDummies::dummy_cols(train, remove_first_dummy = TRUE)
+
+nzv <- nearZeroVar(train_data_dummies)
+train_clean <- train_data_dummies[, -nzv]
+
+
+train_clean <- train_clean[, -1]
+
+
+categorical_cols_1_81 <- sapply(train_clean[, 1:81], function(x) is.factor(x) || is.character(x))
+
+
+train_clean <- train_clean[, !(names(train_clean) %in% names(train_clean[, 1:81])[categorical_cols_1_81])]
+```
+
+
+```{r}
+
+pls_model <- plsr(SalePrice ~ ., data = train_clean, scale = TRUE, validation = "CV")
+
+summary(pls_model)
+
+
+```
+
+```{r}
+pls_model_optimal <- plsr(SalePrice ~ ., data = train_clean, 
+                          scale = TRUE, ncomp = 15)
+
+summary(pls_model_optimal)
+```
+
+```{r}
+
+press_values <- pls_model$validation$PRESS
+
+n <- nrow(train_clean)  
+rmsep_values <- sqrt(press_values / n)
+
+rmsep_subset <- rmsep_values[3:50]
+
+plot(3:50, rmsep_subset, type = "b", 
+     xlab = "Number of Components", ylab = "RMSEP", 
+     main = "RMSEP vs Number of Components (3 and onward)",
+     col = "blue", pch = 16)
+```
+
+
+
+## Linear Model
+
+
+
+```{r}
+model <- lm(SalePrice ~ GrLivArea + GarageCars + KitchenQual + FullBath + Fireplaces, data = train)
+summary(model)
+
+```
+
+
+```{r}
+library(caret)
+
+
+train_control <- trainControl(method = "cv", number = 10)
+
+
+model_cv <- train(SalePrice ~ GrLivArea + GarageCars + KitchenQual + FullBath + Fireplaces + OverallQual + YearBuilt + ExterQual + BsmtQual + Alley + SaleCondition,
+                  data = train,
+                  method = "lm",           # Linear model
+                  trControl = train_control)
+
+
+print(model_cv)
+```
+
+
+
