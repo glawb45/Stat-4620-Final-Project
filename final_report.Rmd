@@ -16,6 +16,7 @@ library(ggplot2)
 library(reshape2)
 library(tree)
 library(randomForest)
+library(tidyverse)
 ```
 
 # Part 1: Exploratory Data Analysis
@@ -392,34 +393,72 @@ qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
 
-# Need to switch from design matrix full_data_X back to df for tree models
+### Need to switch from design matrix full_data_X back to df for tree models
 
-**Tree-based models: Decision Trees, Bagging, Random Forest**
+## Tree-based models: Decision Trees, Bagging, Random Forest
+
+Now, we want to explore the impact of tree-based models on SalePrice to see any impact. The idea behind these types of models is making it almost "easier" to split based on decisions to be made in a tree.
+
+### CART
+
+With classification and regression trees, or CARTs, we identify a binary tree and split based on node purity. A couple ways to depict this are a dendrogram or a purity index plot, such as a Gini index. We want to have the least number of nodes that will still produce the best results for us. To do this, the CART algorithm recursively iterates through the tree to determine the most pure nodes and split there.
+
+Splitting on just one node, or a CART having just one two children, will lead to overfitting — this is where cross-validation helps us, which we address in our model-making.
+
+To grow a regression tree, we must split into a piecewise continuous function:
+$R_1(j, s) = {X|X_j \leq s}$ and $R_2(j, s) = {X|X_j > s}$, where $X_j$ is our splitting variable and $s$ is our split-point.
+
+We do not prune here so we will not focus on that.
+
+Our loss function, somewhat similarly, that we will focus on relates to node purity — because we have talked about Gini in class, we will look at that loss function:
+$$G = \sum_{k = 1}^K(\hat{p}_{mk}(1-\hat{p}_{mk})))$$
+
+### Bagging
+
+Bootstrap Aggregating, or Bagging, is a procedure to reduce variance (trees have a high variance). This approach also attempt to average the means of the trees recurisvely to smooth the discontinuity
+
+In bagging, we first generate some amount B boostrapped samples, and fit those samples to our model:
+$\hat{f}_{bag}(x)$ = $\frac{1}{B} \sum_{b=1}^B \hat{f}_b(x)$
+
+The downside of bagging is it becomes much more difficult to interpret the tree.
+
+### Random Forest
+
+Random Forests are just a more refined version of bagging, the primary difference being the choice of the precitor subset size m. At each split, a random sample m features is drawn — the only features considered moving forward. What's nice about RFs is that each tree has the same expectation and the model method attempts to de-correlate the trees in order to reduce variance (this last point is why RF generally produces better results than bagging).
+
+We attempt to stabilize the error rate and, like bagging, when the number of trees increases, overfitting is prevented. We generally choose to go with m = $\sqrt(p)$ in our model-making process.
+
+### Tree-based Model-Making Using Training Data
 
 ```{r tree with training}
 
+# redistribute the data into its original training and testing sets --> testing will be used later
 training_data <- combined_data[1:num_training, ]
 testing_data <- combined_data[num_training:nrow(combined_data), ]
 
+# fit the CART model
 mod_tree = tree(SalePrice ~ ., data = training_data)
 mod_tree
 
 # get model for decision tree
 summary(mod_tree)
 
-# plot the tree
-plot(mod_tree, cex = 0.8)   # Adjust tree size
-text(mod_tree, pretty = 0, cex = 0.6)  # Adjust text size
+# plot the tree in a dendrogram
+plot(mod_tree, cex = 0.8)
+text(mod_tree, pretty = 0, cex = 0.6)
 
+# Find RMSE
 mod_tree_pred = predict(mod_tree, newdata = training_data)
 mod_tree_rmse = sqrt(mean((training_data$SalePrice - mod_tree_pred)^2))
 mod_tree_rmse
 
+# Use K-fold cross validation to reduce tree complexity
 cv_tree = cv.tree(mod_tree)
 names(cv_tree)
 
 cv_tree
 
+# identify trends in deviance with respect to the size of the tree
 with(cv_tree, plot(dev~size, type = 'b'))
 ```
 
@@ -427,21 +466,24 @@ with(cv_tree, plot(dev~size, type = 'b'))
 
 set.seed(123)
 
+# fit the bagging model
 mod_bag = randomForest(SalePrice ~ ., data = training_data,  mtry = NCOL(training_data)-1, importance = TRUE)
 mod_bag
 
+# identify trends with error rate relative to the number of trees present
 plot(mod_bag)
 
 mod_bag_pred = predict(mod_bag, newdata = training_data)
 mod_bag_rmse  = sqrt(mean((training_data$SalePrice - mod_bag_pred)^2))
 mod_bag_rmse
 
-importance(mod_bag)
+# Make a variable importance plot to show how MSE changes and to show node purity --> higher node purity indicates a more "important" predictor solely from our training set
 varImpPlot(mod_bag, cex = 0.6)
 ```
 
 ```{r Random Forest with training}
 
+# fit the random forest model
 mod_rf = randomForest(SalePrice ~ ., data = training_data,  mtry = sqrt(NCOL(training_data)-1), importance = TRUE)
 mod_rf
 
@@ -451,9 +493,11 @@ mod_rf_pred = predict(mod_rf, newdata = training_data)
 mod_rf_rmse  = sqrt(mean((training_data$SalePrice - mod_rf_pred)^2))
 mod_rf_rmse
 
+# run lines together to compare variable importance in bagging vs. RF
 varImpPlot(mod_rf, cex = 0.6)
-varImpPlot(mod_bag)
+varImpPlot(mod_bag, cex = 0.6)
 
+# Compare the three RMSEs to judge which one we will use for testing
 cat("Tree RMSE:", mod_tree_rmse, "\n")
 cat("Bagging RMSE:", mod_bag_rmse, "\n")
 cat("Random Forest RMSE:", mod_rf_rmse)
@@ -461,6 +505,7 @@ cat("Random Forest RMSE:", mod_rf_rmse)
 
 ```
 
+Given these results, we will likely end up going with either a bagging or RF model as our final, as these two minimize the MSE most.
 
 ## Results with testing data
 
@@ -484,26 +529,56 @@ print(paste("RMSE on test data:", rmse))
 
 ***Now: Use Lasso Model to Advantage***
 
-Now that we have a pruned dataset, in terms of which varaibles are most important, we will use only those variables moving forward for optimal model selection
+Now that we have a pruned dataset from lasso, in terms of which variables are most important, we will use only those variables moving forward for optimal model selection. 
 
-```{r}
+```{r final set manipulation}
 final_set <- full_data_X
-final_set <- as.data.frame(final_set) # convert the model matriix into a data frame
+final_set <- as.data.frame(final_set) # convert the model matrix into a data frame
 
 # Add SalePrice back to the dataset to make tree-based models
 final_set <- cbind(SalePrice = combined_data$SalePrice, final_set)
 
+print(coef(lasso.cv)) # use this line to help us determine the most significant variables
+
 # Only keep informative predictors
-final_set <- final_set[, c(1, 37, 39, 75, 77:78, 123, 126, 144, 154, 163, 178, 181, 190, 198, 214:215, 253)]
+final_set <- final_set[, c("SalePrice",
+                           "MSSubClass",
+                           "MSZoningRM",
+                           "LotArea",
+                           "NeighborhoodNoRidge",
+                           "NeighborhoodNridgHt",
+                           "NeighborhoodStoneBr",
+                           "OverallQual",
+                           "YearBuilt",
+                           "YearRemodAdd",
+                           "MasVnrArea",
+                           "BsmtExposureGd",
+                           "BsmtExposureNo",
+                           "BsmtFinType1GLQ",
+                           "BsmtFinSF1",
+                           "TotalBsmtSF",
+                           "X1stFlrSF",
+                           "GrLivArea",
+                           "KitchenQualTA",
+                           "Fireplaces",
+                           "GarageArea",
+                           "WoodDeckSF",
+                           "SaleTypeNew")]
+
+ncol(final_set)
+
+# same split used as above in ridge and lasso
+training_data <- final_set[1:num_training, ]
+testing_data <- final_set[num_training:nrow(final_set), ]
+
 ```
 
+Now, we have our optimal dataset for model-making using our testing data. We only have 22 predictor variables now. Up until now with the trees, we have decided to not talk about the plots — now that we are using testing data, we will explain trends and such.
 
 
 ```{r tree with testing}
 
-training_data <- final_set[1:num_training, ]
-testing_data <- final_set[num_training:nrow(combined_data), ]
-
+set.seed(123)
 mod_tree = tree(SalePrice ~ ., data = training_data)
 mod_tree
 
@@ -525,6 +600,11 @@ cv_tree
 
 with(cv_tree, plot(dev~size, type = 'b'))
 ```
+From the summary of our model, we see that there are nine leaves and just four of our 22 predictors were used in the tree construction: overall quality, above ground living area, total basement area, and remodel date. This tells us already that these four variables may have a big impact on sale price of a house in Ames, Iowa — once again, these splits were based on node purity as well.
+
+Something ironic is that three of these four variables are continuous, while the parent node, overall quality, is categorical (range from 1-10 and can only take discrete values). We see from the dendrogram that the first split comes on when overall quality is $<$ 7.5. From the tree, we see that, once again mostly entirely based on these four variables, an overall living quality rating of less than 6.5 generally corresponds to a lower above ground living area and further corresponds to a cheaper house than that with a quality rating above 8.5.
+
+Finally with our deviance plot, we see that the variance and deviance will both decrease when the size of the tree gets larger, which is what we knew already. The deviance is still concerningly high, but so is our RMSE, so we will be complacent. With an RMSE of above 42,000, we know we will likely not be choosing CARTs as our final model, however.
 
 
 ```{r bagging with testing}
@@ -539,12 +619,23 @@ mod_bag_pred = predict(mod_bag, newdata = testing_data)
 mod_bag_rmse  = sqrt(mean((testing_data$SalePrice - mod_bag_pred)^2))
 mod_bag_rmse
 
-importance(mod_bag)
 varImpPlot(mod_bag, cex = 0.6)
 ```
 
+Moving on to bagging, we see that bagging attempts to use all 22 of our predictor variables, as it shows in the summary. This is already going to do better than our decision tree model because, despite the forseeable problem of overfitting, we know that bagging reduces variance and prevents overfitting anyways.
+
+From the plot, we see the error rate decreasing logarithmically with respect to the number of trees present — remember, bagging and forests use multiple decision trees to come up with a better model.
+
+In our predictor importance plots, we see that the percentage increase in MSE encompassed by some familiar variables is very high, particularly for overall quality, above ground living area, and total basement square footage. We further see that garage area certainly has an influence on MSE, followed by a few other variables, and ending with the Stone Brook neighborhood, which seems to have the lowest affect on MSE.
+
+Very similarly for node purity, we can see which variables the most pure — this goes back to our Gini index — and see that overall quality takes the throne yet again. We know that this rating is so important in determining the price a house is sold at in Ames. Generally, we can likely use this variable, and many of these variables in particular, to determine a general housing price in any neighborhood in the United States, at the very least.
+
+Because we are taking the multiple decision trees approach here, we see that the RMSE reduces substantially to just over 25,000 — our decisions are getting better.
+
+
 ```{r Random Forest with testing}
 
+set.seed(123)
 mod_rf = randomForest(SalePrice ~ ., data = training_data,  mtry = sqrt(NCOL(training_data)-1), importance = TRUE)
 mod_rf
 
@@ -557,23 +648,14 @@ mod_rf_rmse
 varImpPlot(mod_rf, cex = 0.6)
 varImpPlot(mod_bag, cex = 0.6)
 
-cat("Tree RMSE:", mod_tree_rmse, "\n")
-cat("Bagging RMSE:", mod_bag_rmse, "\n")
-cat("Random Forest RMSE:", mod_rf_rmse)
-
-plot(mod_rf, cex = 0.8)   # Adjust tree size
-text(mod_rf, pretty = 0, cex = 0.6)  # Adjust text size
-
 library(rpart)
 library(rpart.plot)
 
-
-tree_model <- rpart(SalePrice ~ ., data = training_data)
+tree_model <- rpart(SalePrice ~ ., data = testing_data)
 rpart.plot::rpart.plot(tree_model)
 
-
 # Get the feature importance
-importance_matrix <- importance(mod_rf)
+importance_matrix <- randomForest::importance(mod_rf)
 
 # Perform hierarchical clustering on feature importance
 dendrogram <- hclust(dist(importance_matrix))
@@ -581,4 +663,29 @@ dendrogram <- hclust(dist(importance_matrix))
 # Plot the dendrogram
 plot(dendrogram, main = "Dendrogram of Feature Importance", xlab = "Features", ylab = "Distance")
 
+cat("Tree RMSE:", mod_tree_rmse, "\n")
+cat("Bagging RMSE:", mod_bag_rmse, "\n")
+cat("Random Forest RMSE:", mod_rf_rmse)
 ```
+
+The first interesting result we see here is that only five variables were tried at each split for random forests — this may be a cause for concern, but this and bagging will generally give us the best results, so we will hold onto that thought.
+
+We acheive relatively similar results for our error plot, so I will avoid redundancy there. However, with our MSE and node purity plots, we see an abrupt break from normalcy — with increasing MSE, we see that more nodes have a higher impact on the increase. With node purity, we see that despite a dominance we saw in the bagging model with overall quality, other variables seem to be competing for high purity in RF. Living area, garage area, basement area, year built and first floor area all have bigger impacts it seems now. This is awfully interesting, but perhaps makes more sense why we see only close to five variables considered at each split.
+
+Moving onto the horizontal dendrogram, we attempt to pick out the most important features from our already condensed list. This doesn't really give us any new information, but is simply another depiction of some of our better features, ranked.
+
+We also give a fairly similar approach with our dendrogram — this only shows us one of our several decision trees we use in RF. Nothing really different here in our results.
+
+We finally attempt to view the RMSE for all our tree-based models. Now, it is clear that random forest does the best.
+
+# Conclusions
+
+We opted against running a KNN model, although we had discussed this in our presentation, because we felt this would not perform as well as any of our tree-based modeling.
+
+In the end, however, although the lasso model helped us determine our final modeling techniques by using our condensed dataset, we chose our random forest model.
+
+Given our random forest model, with an RMSE of just under 24,000, we can say, in comparison to other models, that this one performs the best of any of the approaches we took. We believe that one can confidently say several of the variables identified as important can be used when actually buying a house anywhere, not just in Ames, Iowa. Of course, a foundational piece of stats is inference, and, although this is just one sample, this tells us a lot about people's decision-making. 
+
+Websites like Zillow tell us a lot of these metrics, as it is very important to determine the overall quality rating from the current homeowners to make more accurate decisions. We see that overall quality, above-ground living area, garage area, and really most factors involving some sort of living space/area tend to have the largest impact on a house's sale price, which makes a lot of sense. Consumers are going to want a good amount of space for their families and cars and other amenities, so it certainly makes sense that as these areas increase, as does the selling price.
+
+We thank you for going through this report, and hopefully this can help someone when buying a house down the road.
