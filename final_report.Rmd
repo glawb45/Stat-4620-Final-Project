@@ -317,10 +317,10 @@ par(mfrow = c(1, 2), mar = c(5, 4, 4, 2) + 1)
 plot(ridge.cv,main='Ridge Lambda Performance') 
 plot(lasso.cv, main='LASSO Lambda Performance') 
 
-# print out coefficients for lasso model to see which ones to select
-print(coef(lasso.cv))
 
 ```
+
+Ridge gives a lower validated RMSE than LASSO, so we will remove LASSO from consideration.
 
 **Assumptions:**
 
@@ -362,6 +362,8 @@ hist(residuals, main = "Histogram of Residuals", xlab = "Residuals")
 qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
+
+
 ## PLS Model
 
 The PLS Model uses Ames predictors and identifies new features $Z_1 , . . . , Z_M$ which are linear
@@ -411,7 +413,8 @@ qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
 
-### Need to switch from design matrix full_data_X back to df for tree models
+
+From the plots above, we see that neither model completely satisfies the necessary assumptions. When examining the fitted values vs residuals, it is clear that patterns exist and data points are not scattered randomly - especially when examining Ridge regression. While PLS gives better plots than Ridge for both the QQ and fitted vs residuals, they are still not optimal. We will explore a different model.
 
 ## Tree-based models: Decision Trees, Bagging, Random Forest
 
@@ -436,6 +439,7 @@ $$G = \sum_{k = 1}^K(\hat{p}_{mk}(1-\hat{p}_{mk})))$$
 Bootstrap Aggregating, or Bagging, is a procedure to reduce variance (trees have a high variance). This approach also attempt to average the means of the trees recurisvely to smooth the discontinuity
 
 In bagging, we first generate some amount B boostrapped samples, and fit those samples to our model:
+
 $\hat{f}_{bag}(x)$ = $\frac{1}{B} \sum_{b=1}^B \hat{f}_b(x)$
 
 The downside of bagging is it becomes much more difficult to interpret the tree.
@@ -527,24 +531,6 @@ Given these results, we will likely end up going with either a bagging or RF mod
 
 ## Results with testing data
 
-```{r lasso + ridge}
-
-cv_model = cv.glmnet(trainX, trainY, alpha = 0) 
-
-best_lambda = cv_model$lambda.min
-print(paste("Optimal Lambda:", best_lambda))
-
-# Fit final Ridge model with the best lambda
-final_model = glmnet(trainX, trainY, alpha = 0, lambda = best_lambda)
-
-# Predict on test data
-predictions = predict(final_model, newx = testX)
-
-# Evaluate model performance (RMSE)
-rmse = sqrt(mean((predictions - testY)^2))
-print(paste("RMSE on test data:", rmse))
-```
-
 ***Now: Use Lasso Model to Advantage***
 
 Now that we have a pruned dataset from lasso, in terms of which variables are most important, we will use only those variables moving forward for optimal model selection. 
@@ -618,6 +604,8 @@ cv_tree
 
 with(cv_tree, plot(dev~size, type = 'b'))
 ```
+
+
 From the summary of our model, we see that there are nine leaves and just four of our 22 predictors were used in the tree construction: overall quality, above ground living area, total basement area, and remodel date. This tells us already that these four variables may have a big impact on sale price of a house in Ames, Iowa — once again, these splits were based on node purity as well.
 
 Something ironic is that three of these four variables are continuous, while the parent node, overall quality, is categorical (range from 1-10 and can only take discrete values). We see from the dendrogram that the first split comes on when overall quality is $<$ 7.5. From the tree, we see that, once again mostly entirely based on these four variables, an overall living quality rating of less than 6.5 generally corresponds to a lower above ground living area and further corresponds to a cheaper house than that with a quality rating above 8.5.
