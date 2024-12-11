@@ -362,6 +362,24 @@ hist(residuals, main = "Histogram of Residuals", xlab = "Residuals")
 qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
+## PLS Model
+
+The PLS Model uses Ames predictors and identifies new features $Z_1 , . . . , Z_M$ which are linear
+combinations of the predictors $X_1 , . . . , X_P$ 
+
+Then, it fits the regression model:
+
+$y_i = \theta_0 + \sum_{m=1}^{M} \theta_m z_{mi} + \epsilon_i$
+
+
+
+PLS models make assumptions such as:
+
+Linearity: The relationship between predictors and the target variable is linear.
+
+Independent Errors: Residuals are independent of each other.
+
+Normality of Errors: Residuals are normally distributed.
 
 
 **PLS Plots**
