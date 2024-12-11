@@ -363,6 +363,9 @@ qqnorm(residuals)
 qqline(residuals, col = "red")
 ```
 
+We see here the trends from the QQ plots, as well as those comparing residuals to our fitted values. We want to minimize our residuals as much as possible, but these have a very large range, showing us that ridge might not be the best way to go when we begin our testing.
+
+As with the QQ plots, we want the trend between our sample and predicted quantiles to be as close to zero as possible in order for normality and standardization to apply. While we see this does a good job in the middle of our model, perhaps using something like natural splines would have standardized this further.
 
 ## PLS Model
 
